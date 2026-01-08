@@ -11,10 +11,10 @@ from pathlib import Path
 from typing import List
 
 from dotenv import load_dotenv
-from langchain.chains.summarize import load_summarize_chain
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
-from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
 
 
@@ -77,7 +77,7 @@ class PDFSummarizer:
         lines = [line for line in content.split("\n") if not line.strip().startswith("#")]
         return "\n".join(lines).strip()
 
-    def create_map_prompt(self) -> PromptTemplate:
+    def create_map_prompt(self) -> ChatPromptTemplate:
         """
         Mapステップ用のプロンプトを作成
 
@@ -89,13 +89,13 @@ class PDFSummarizer:
 
         # カスタムプロンプトが空でない場合は結合
         if custom_prompt:
-            full_prompt = f"{base_prompt}\n\n追加要件：\n{custom_prompt}\n\n{{text}}"
+            full_prompt = f"{base_prompt}\n\n追加要件：\n{custom_prompt}\n\n以下のテキストを要約してください：\n\n{{text}}"
         else:
-            full_prompt = f"{base_prompt}\n\n{{text}}"
+            full_prompt = f"{base_prompt}\n\n以下のテキストを要約してください：\n\n{{text}}"
 
-        return PromptTemplate(template=full_prompt, input_variables=["text"])
+        return ChatPromptTemplate.from_template(full_prompt)
 
-    def create_reduce_prompt(self) -> PromptTemplate:
+    def create_reduce_prompt(self) -> ChatPromptTemplate:
         """
         Reduceステップ用のプロンプトを作成
 
@@ -107,11 +107,11 @@ class PDFSummarizer:
 
         # カスタムプロンプトが空でない場合は結合
         if custom_prompt:
-            full_prompt = f"{base_prompt}\n\n追加要件：\n{custom_prompt}\n\n{{text}}"
+            full_prompt = f"{base_prompt}\n\n追加要件：\n{custom_prompt}\n\n以下は各セクションの要約です。これらを統合して最終的な要約を作成してください：\n\n{{text}}"
         else:
-            full_prompt = f"{base_prompt}\n\n{{text}}"
+            full_prompt = f"{base_prompt}\n\n以下は各セクションの要約です。これらを統合して最終的な要約を作成してください：\n\n{{text}}"
 
-        return PromptTemplate(template=full_prompt, input_variables=["text"])
+        return ChatPromptTemplate.from_template(full_prompt)
 
     def load_pdf(self, pdf_path: str) -> List[Document]:
         """
@@ -153,20 +153,28 @@ class PDFSummarizer:
         map_prompt = self.create_map_prompt()
         reduce_prompt = self.create_reduce_prompt()
 
-        # Map-Reduceチェーンを作成
-        chain = load_summarize_chain(
-            llm=self.llm,
-            chain_type="map_reduce",
-            map_prompt=map_prompt,
-            combine_prompt=reduce_prompt,
-            verbose=True,
-        )
+        # Map chain - 各ページを要約（LCEL）
+        map_chain = map_prompt | self.llm | StrOutputParser()
 
-        # 要約を実行
-        print("\n要約を実行中...")
-        result = chain.invoke({"input_documents": documents})
+        # Map処理: 各ドキュメントを個別に要約
+        print("\nMap処理: 各ページを要約中...")
+        summaries = []
+        for i, doc in enumerate(documents, 1):
+            print(f"  ページ {i}/{len(documents)} を処理中...")
+            summary = map_chain.invoke({"text": doc.page_content})
+            summaries.append(summary)
 
-        return result["output_text"]
+        # Reduce処理: すべての要約を統合
+        print("\nReduce処理: 要約を統合中...")
+        reduce_chain = reduce_prompt | self.llm | StrOutputParser()
+
+        # すべての要約を結合
+        combined_summaries = "\n\n".join([f"セクション{i+1}:\n{s}" for i, s in enumerate(summaries)])
+
+        # 最終的な要約を生成
+        final_summary = reduce_chain.invoke({"text": combined_summaries})
+
+        return final_summary
 
 
 def main():
