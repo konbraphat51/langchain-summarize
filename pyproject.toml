@@ -1,0 +1,21 @@
+[project]
+name = "langchain-summarize"
+version = "0.1.0"
+description = "PDF summarization using LangChain map-reduce with custom prompts"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "langchain>=0.1.0",
+    "langchain-openai>=0.0.5",
+    "langchain-community>=0.0.20",
+    "pypdf>=3.17.0",
+    "python-dotenv>=1.0.0",
+    "openai>=1.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
